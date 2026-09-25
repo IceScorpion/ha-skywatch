@@ -19,8 +19,14 @@
       padding: 0;
       background: #0b0e13;
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      display: flex;
+      flex-direction: column;
     }
-    #map { width: 100%; height: 100%; }
+    #map {
+      flex: 1 1 auto;
+      min-height: 0;
+      width: 100%;
+    }
 
     /* Plane marker — outer wrapper holds the rotated SVG + label */
     .plane-marker {
@@ -28,6 +34,7 @@
       flex-direction: column;
       align-items: center;
       width: 60px;
+      cursor: pointer;
     }
     .plane-icon {
       width: 28px;
@@ -88,27 +95,6 @@
     }
     #legend .ico svg { width: 14px; height: 14px; }
 
-    /* Recenter button — sits below the zoom controls */
-    .leaflet-control.skywatch-recenter {
-      background: rgba(11,14,19,0.85);
-      color: #4fc3f7;
-      border: 1px solid rgba(79,195,247,0.4);
-      border-radius: 4px;
-      width: 30px;
-      height: 30px;
-      font-size: 16px;
-      line-height: 1;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      padding: 0;
-    }
-    .leaflet-control.skywatch-recenter:hover {
-      background: rgba(79,195,247,0.15);
-      border-color: #4fc3f7;
-    }
-
     /* Status badge */
     #status {
       position: absolute;
@@ -122,20 +108,35 @@
       pointer-events: none;
     }
 
-    /* Tooltip styling */
-    .leaflet-tooltip.sky-tip {
-      background: rgba(11,14,19,0.92);
+    /* Feste Info-Box unter der Karte (ersetzt den schwebenden Tooltip).
+       Bleibt stehen, bis ein anderes Flugzeug gehovert/getippt wird -
+       kein Timing-Wettlauf mehr, Links sind in Ruhe klickbar. */
+    #info-panel {
+      flex: 0 0 auto;
+      min-height: 44px;
+      box-sizing: border-box;
+      background: rgba(11,14,19,0.96);
+      border-top: 1px solid #2a323c;
       color: #e0e6ed;
-      border: 1px solid #4fc3f7;
-      border-radius: 4px;
       font: 12px/1.4 system-ui, sans-serif;
-      padding: 6px 8px;
+      padding: 8px 10px;
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 4px 8px;
     }
-    .leaflet-tooltip.sky-tip .cs {
+    #info-panel.placeholder {
+      color: #6b7684;
+      font-style: italic;
+    }
+    #info-panel .ip-cs a {
       font: 600 13px ui-monospace, monospace;
       color: #4fc3f7;
+      text-decoration: none;
     }
-    .leaflet-tooltip.sky-tip .alt { color: #aab4be; }
+    #info-panel .ip-cs a:hover { text-decoration: underline; }
+    #info-panel .ip-sep { color: #4a5560; }
+    #info-panel .ip-watch { color: #ab47bc; font-weight: 600; }
   </style>
 </head>
 <body>
@@ -157,6 +158,7 @@
     <div class="lrow"><span class="ico" id="leg-military"></span>military</div>
     <div class="lrow"><span class="ico" id="leg-helo"></span>helicopter</div>
   </div>
+  <div id="info-panel" class="placeholder">Fahre mit der Maus über ein Flugzeug für Details …</div>
 
   <script>
     "use strict";
@@ -227,102 +229,153 @@
       return CATEGORY_SVG[category] || JET_SVG;
     }
 
-    function tooltipHtml(p) {
-      const cs = p.callsign || p.flight_number || "—";
-      const route = (p.origin_iata || "?") + " → " + (p.destination_iata || "?");
-      const ac = p.aircraft_code || p.aircraft_model || "";
-      const fl = (p.altitude_ft != null) ? "FL" + Math.floor(p.altitude_ft / 100) : "";
-      const sp = (p.ground_speed_kt != null) ? `${p.ground_speed_kt} kt` : "";
-      const watch = p.watch_label ? `<div class="alt">⚑ ${p.watch_label}</div>` : "";
-      return `<div class="cs">${cs}</div><div>${ac}</div><div class="alt">${fl} · ${sp}</div><div class="alt">${route}</div>${watch}`;
+    // Eigene Namenszuordnung: bereinigte Kennung/Callsign -> Christoph-Name.
+    // Duplikat von sensor.skywatch_heli_names, da diese Seite statisch ist
+    // und keinen Zugriff auf HA-Entities hat. Bei Änderungen dort auch hier
+    // nachziehen (oder später auf einen eigenen JSON-Endpoint umstellen).
+    const HELI_NAMES = {
+      "DHYAU": "Christoph Murnau",
+      "CHX74": "Christoph Murnau",
+      "CHX01": "Christoph 1",
+      "DHXCJ": "Christoph Springer",
+    };
+
+    const COMPASS = ["N","NNE","NE","ENE","E","ESE","SE","SSE","S","SSW","SW","WSW","W","WNW","NW","NNW"];
+    function compassFor(deg) {
+      if (deg == null || isNaN(deg)) return "";
+      return COMPASS[Math.round((deg % 360) / 22.5) % 16];
+    }
+
+    // Haversine-Distanz in km, home als [lon, lat] (GeoJSON-Reihenfolge).
+    function distanceKm(home, lat, lon) {
+      if (!home) return null;
+      const [homeLon, homeLat] = home;
+      const R = 6371;
+      const dLat = (lat - homeLat) * Math.PI / 180;
+      const dLon = (lon - homeLon) * Math.PI / 180;
+      const a = Math.sin(dLat / 2) ** 2 +
+                Math.cos(homeLat * Math.PI / 180) * Math.cos(lat * Math.PI / 180) *
+                Math.sin(dLon / 2) ** 2;
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    }
+
+    // HTML für die feste Info-Box unter der Karte (ersetzt tooltipHtml).
+    // p.home/p.lat/p.lon werden von showInfoPanel ergänzt (siehe dort),
+    // da panelHtml selbst keinen Zugriff auf die aktuelle Kartenmitte hat.
+    function panelHtml(p) {
+      const cs = p.callsign || "";
+      const key = cs.replace(/-/g, "").toUpperCase();
+      const friendly = HELI_NAMES[key];
+      const csDisplay = cs
+        ? `<a href="https://flightaware.com/live/flight/${encodeURIComponent(cs)}" target="_blank" rel="noopener">${friendly ? friendly : cs}</a>${friendly ? ` <span class="ip-sep">(${cs})</span>` : ""}`
+        : "—";
+      const model = p.aircraft_model || p.aircraft_code || "—";
+      const fl = (p.altitude_ft != null) ? "FL" + Math.floor(p.altitude_ft / 100) : "—";
+      const sp = (p.ground_speed_kt != null) ? `${p.ground_speed_kt} kt` : "—";
+      const hdg = (p.heading != null) ? `${compassFor(p.heading)} (${Math.round(p.heading)}°)` : "—";
+      const dist = (p._distanceKm != null) ? `${p._distanceKm.toFixed(1)} km` : "—";
+      const watch = p.watch_label ? `<span class="ip-sep">·</span><span class="ip-watch">⚑ ${p.watch_label}</span>` : "";
+      return `<span class="ip-cs">${csDisplay}</span>` +
+             `<span class="ip-sep">·</span><span>${model}</span>` +
+             `<span class="ip-sep">·</span><span>${fl}</span>` +
+             `<span class="ip-sep">·</span><span>${sp}</span>` +
+             `<span class="ip-sep">·</span><span>${hdg}</span>` +
+             `<span class="ip-sep">·</span><span>${dist}</span>` +
+             watch;
+    }
+
+    let lastHome = null;  // wird in tick() gesetzt, hier zum Distanz-Berechnen gebraucht
+
+    function showInfoPanel(p, lat, lon) {
+      const panel = document.getElementById("info-panel");
+      panel.classList.remove("placeholder");
+      const enriched = { ...p, _distanceKm: distanceKm(lastHome, lat, lon) };
+      panel.innerHTML = panelHtml(enriched);
     }
 
     let map = null;
     let homeMarker = null;
     let radiusCircle = null;
     let audibleCircle = null;
-    const tracks = new Map();  // flight_id → { marker, trailLine, color }
+    const tracks = new Map();  // flight_id → { marker, trailLine, color, props }
 
-    function ensureMap(home, radiusM, audibleM) {
-      if (map) return;
-      map = L.map("map", { zoomControl: true, attributionControl: false })
-              .setView([home[1], home[0]], 10);
-      // Match ha-tinker exactly: dark_nolabels is significantly darker
-      // than the default 'dark_matter' which renders nearly-light-grey
-      // in rural regions (no roads to highlight). subdomains: 'abcd'
-      // is required by CartoCDN per their docs.
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png",
-        {
-          maxZoom: 19,
-          subdomains: "abcd",
-          attribution: "© OSM · © CARTO",
-        }
-      ).addTo(map);
+function ensureMap(home, radiusM, audibleM) {
+  if (map) return;
+  map = L.map("map", { zoomControl: true, attributionControl: false })
+          .setView([home[1], home[0]], 10);
 
-      // Home + AOI ring
-      homeMarker = L.marker([home[1], home[0]], {
-        icon: L.divIcon({
-          html: `<div style="font-size:18px;line-height:1;text-align:center;background:rgba(11,14,19,0.85);border:2px solid #4fc3f7;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;">🏠</div>`,
-          iconSize: [28, 28],
-          iconAnchor: [14, 14],
-          className: ""
-        }),
-        interactive: false,
-        zIndexOffset: -1000,
-      }).addTo(map);
-      radiusCircle = L.circle([home[1], home[0]], {
-        radius: radiusM,
-        color: "#4fc3f7",
-        weight: 1,
-        opacity: 0.4,
-        dashArray: "4 6",
-        fill: false,
-      }).addTo(map);
-      if (audibleM > 0) {
-        audibleCircle = L.circle([home[1], home[0]], {
-          radius: audibleM,
-          color: "#ffd54f",
-          weight: 1,
-          opacity: 0.5,
-          dashArray: "2 4",
-          fill: false,
-        }).addTo(map);
-      }
-
-      // Initial viewport: fit the entire AOI circle in view with a
-      // small padding so edge aircraft markers don't get clipped.
-      // Replaces the placeholder zoom 10 from setView() above.
-      // This runs once (first ensureMap call) — subsequent ticks
-      // never touch pan/zoom, so the user's interactive viewport is
-      // preserved as they explore.
-      map.fitBounds(radiusCircle.getBounds(), { padding: [20, 20] });
-
-      // Recenter-on-home button — clicking restores the initial
-      // AOI-fit view without reloading the page. Sits in the
-      // topleft control bar under Leaflet's zoom controls.
-      const RecenterControl = L.Control.extend({
-        onAdd: () => {
-          const btn = L.DomUtil.create("button", "leaflet-bar leaflet-control skywatch-recenter");
-          btn.title = "Recenter on home";
-          btn.innerHTML = "🏠";
-          L.DomEvent.disableClickPropagation(btn);
-          btn.onclick = () => {
-            map.fitBounds(radiusCircle.getBounds(), { padding: [20, 20] });
-          };
-          return btn;
-        },
-      });
-      new RecenterControl({ position: "topleft" }).addTo(map);
-
-      // Populate legend silhouettes
-      for (const [cat, svg] of Object.entries(CATEGORY_SVG)) {
-        const slug = cat.replace(/_/g, "-");
-        const el = document.getElementById("leg-" + slug);
-        if (el) el.innerHTML = svg;
-      }
+  // Wikimedia Maps liefert 403 bei Fremdnutzung - laut deren Fehlermeldung
+  // sind die Tiles ausdrücklich nur für Wikimedia-eigene/-affiliierte Seiten
+  // freigegeben, keine offene Public-API. Daher Wechsel auf Esri "World Dark
+  // Gray Canvas": läuft auf echtem CDN, kein API-Key nötig, für Fremdnutzung
+  // mit Attribution erlaubt, und optisch näher am ursprünglich beabsichtigten
+  // dunklen Look (dark_nolabels) als eine normale Straßenkarte. WICHTIG:
+  // Esri nutzt {z}/{y}/{x} (y vor x!), nicht das sonst übliche {z}/{x}/{y}.
+  const tileLayer = L.tileLayer(
+    "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    {
+      maxZoom: 16,
+      attribution: "© Esri, HERE, Garmin, © OpenStreetMap contributors",
+      updateWhenZooming: false,
+      keepBuffer: 4,
     }
+  ).addTo(map);
 
+  // Retry fehlgeschlagener/nicht rechtzeitig geladener Kacheln statt sie
+  // dauerhaft grau zu lassen. Max. 3 Versuche pro Kachel, mit steigender
+  // Wartezeit, damit wir bei echten Ausfällen nicht endlos nachfragen.
+  const MAX_TILE_RETRIES = 3;
+  const tileRetryCount = new WeakMap();
+
+  tileLayer.on("tileerror", (err) => {
+    const tile = err.tile;
+    const attempts = tileRetryCount.get(tile) || 0;
+    if (attempts >= MAX_TILE_RETRIES) return;
+    tileRetryCount.set(tile, attempts + 1);
+    const delay = 400 * Math.pow(2, attempts); // 400ms, 800ms, 1600ms
+    setTimeout(() => {
+      const src = err.tile.src.split("?")[0];
+      err.tile.src = src + "?retry=" + Date.now();
+    }, delay);
+  });
+
+  // Home + AOI ring
+  homeMarker = L.marker([home[1], home[0]], {
+    icon: L.divIcon({
+      html: `<div style="font-size:18px;line-height:1;text-align:center;background:rgba(11,14,19,0.85);border:2px solid #4fc3f7;border-radius:50%;width:28px;height:28px;display:flex;align-items:center;justify-content:center;">🏠</div>`,
+      iconSize: [28, 28],
+      iconAnchor: [14, 14],
+      className: ""
+    }),
+    interactive: false,
+    zIndexOffset: -1000,
+  }).addTo(map);
+  radiusCircle = L.circle([home[1], home[0]], {
+    radius: radiusM,
+    color: "#4fc3f7",
+    weight: 1,
+    opacity: 0.4,
+    dashArray: "4 6",
+    fill: false,
+  }).addTo(map);
+  if (audibleM > 0) {
+    audibleCircle = L.circle([home[1], home[0]], {
+      radius: audibleM,
+      color: "#ffd54f",
+      weight: 1,
+      opacity: 0.5,
+      dashArray: "2 4",
+      fill: false,
+    }).addTo(map);
+  }
+
+  // Populate legend silhouettes
+  for (const [cat, svg] of Object.entries(CATEGORY_SVG)) {
+    const slug = cat.replace(/_/g, "-");
+    const el = document.getElementById("leg-" + slug);
+    if (el) el.innerHTML = svg;
+  }
+}
     function trackFor(id) {
       let t = tracks.get(id);
       if (!t) { t = {}; tracks.set(id, t); }
@@ -352,14 +405,30 @@
       });
 
       const track = trackFor(id);
+      // Props immer aktuell halten - der mouseover-Handler unten liest
+      // track.props zum Zeitpunkt des Hovers, nicht die zur Marker-Erstellung
+      // eingefangenen (potenziell veralteten) Properties.
+      track.props = p;
+
       if (!track.marker) {
-        track.marker = L.marker([lat, lon], { icon, riseOnHover: true })
-          .addTo(map)
-          .bindTooltip(tooltipHtml(p), { className: "sky-tip", direction: "top", offset: [0, -8] });
+        track.marker = L.marker([lat, lon], { icon, riseOnHover: true }).addTo(map);
+        // Feste Info-Box statt Tooltip: kein Verschwinden mehr, bevor man
+        // einen Link anklicken kann. mouseover für Desktop, click zusätzlich
+        // für Touch-Geräte ohne Hover. Aktuelle Position kommt aus
+        // track.marker.getLatLng(), nicht aus dem lat/lon-Closure von hier -
+        // sonst würde beim Hover immer die Position vom Erstellungszeitpunkt
+        // genutzt statt der aktuellen.
+        track.marker.on("mouseover", () => {
+          const ll = track.marker.getLatLng();
+          showInfoPanel(track.props, ll.lat, ll.lng);
+        });
+        track.marker.on("click", () => {
+          const ll = track.marker.getLatLng();
+          showInfoPanel(track.props, ll.lat, ll.lng);
+        });
       } else {
         track.marker.setLatLng([lat, lon]);
         track.marker.setIcon(icon);
-        track.marker.setTooltipContent(tooltipHtml(p));
       }
       track.category = category;
       // Sync trail color if a trail exists
@@ -420,6 +489,7 @@
         if (data.home && data.radius_m != null) {
           ensureMap(data.home, data.radius_m, data.audible_radius_m || 0);
         }
+        if (data.home) lastHome = data.home;
         if (!map) {
           statusEl.textContent = "skywatch unconfigured";
           return;
