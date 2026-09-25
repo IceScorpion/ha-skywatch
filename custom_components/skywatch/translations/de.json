@@ -1,0 +1,85 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Skywatch",
+        "description": "Skywatch einrichten, um Flugzeugsichtungen rund um dein Zuhause zu erfassen und darzustellen.",
+        "data": {
+          "home_latitude": "Breitengrad (Home)",
+          "home_longitude": "Längengrad (Home)",
+          "airport_iata": "IATA-Code eines nahen Flughafens (optional)",
+          "radius_km": "Überwachungsradius (km)"
+        }
+      }
+    },
+    "error": {
+      "invalid_latitude": "Der Breitengrad muss zwischen -90 und 90 liegen.",
+      "invalid_longitude": "Der Längengrad muss zwischen -180 und 180 liegen.",
+      "invalid_iata": "Der Flughafen-Code muss genau 3 Buchstaben haben (z. B. JFK).",
+      "fr24_not_loaded": "Die Flightradar24-Integration muss installiert und eingerichtet sein, bevor Skywatch konfiguriert werden kann."
+    },
+    "abort": {
+      "already_configured": "Skywatch ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "watch_list": "Watch List",
+          "codes": "Helikopter-/Militär-ICAO-Codes",
+          "thresholds": "Overhead-Schwellenwerte & Alarme"
+        }
+      },
+      "watch_list": {
+        "title": "Watch List",
+        "description": "Aktuelle Einträge: {current}",
+        "menu_options": {
+          "add_watch": "Eintrag hinzufügen",
+          "remove_watch": "Eintrag entfernen",
+          "init": "Zurück zum Hauptmenü"
+        }
+      },
+      "add_watch": {
+        "title": "Watch-List-Eintrag hinzufügen",
+        "description": "Mindestens eines von Registrierung, Flugzeugtyp-Code oder \"Blocked\" mit erfassen angeben.",
+        "data": {
+          "slug": "Slug (Kleinbuchstaben, Zahlen, Unterstrich)",
+          "label": "Bezeichnung",
+          "registration": "Registrierung (z. B. D-ABCD)",
+          "aircraft_code": "Flugzeugtyp ICAO-Code (z. B. A320)",
+          "match_blocked": "Auch Sichtungen ohne Daten (\"Blocked\") erfassen"
+        }
+      },
+      "remove_watch": {
+        "title": "Watch-List-Eintrag entfernen",
+        "data": {
+          "slug": "Zu entfernender Eintrag"
+        }
+      },
+      "codes": {
+        "title": "Helikopter-/Militär-ICAO-Codes",
+        "description": "Kommagetrennte Listen von ICAO-Flugzeugtyp-Codes. Feld unverändert lassen, um die aktuelle Liste zu behalten.",
+        "data": {
+          "helo_codes": "Helikopter-ICAO-Codes",
+          "military_codes": "Militär-ICAO-Codes"
+        }
+      },
+      "thresholds": {
+        "title": "Overhead-Schwellenwerte & Alarme",
+        "data": {
+          "overhead_distance_km": "Overhead-Distanz (km)",
+          "overhead_altitude_ft": "Overhead-Höhe (ft)",
+          "alerts_enabled": "Alarme aktiviert",
+          "quiet_hours_start": "Ruhezeit Beginn (HH:MM, optional)",
+          "quiet_hours_end": "Ruhezeit Ende (HH:MM, optional)"
+        }
+      }
+    },
+    "error": {
+      "invalid_slug": "Slug darf nur Kleinbuchstaben, Zahlen und Unterstriche enthalten.",
+      "slug_exists": "Ein Watch-Eintrag mit diesem Slug existiert bereits.",
+      "watch_entry_needs_criteria": "Mindestens Registrierung, Flugzeugtyp-Code oder \"Blocked\" mit erfassen angeben."
+    }
+  }
+}
