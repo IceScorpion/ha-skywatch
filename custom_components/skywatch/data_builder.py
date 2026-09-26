@@ -14,13 +14,16 @@ import sqlite3
 from zoneinfo import ZoneInfo
 
 from .classify import WatchEntry
+from .const import DEFAULT_HELO_CODES
 from .storage import (
     query_active_1h,
     query_active_24h,
+    query_helicopters,
     query_hour_histogram,
     query_military,
     query_movements_today,
     query_overhead,
+    query_planes,
     query_recent,
     query_search,
     query_stats,
@@ -38,6 +41,7 @@ def build_data(
     current_search: str,
     military_codes: tuple[str, ...],
     watch_list: tuple[WatchEntry, ...],
+    helo_codes: tuple[str, ...] = DEFAULT_HELO_CODES,
     overhead_distance_km: float = 5.0,
     overhead_altitude_ft: int = 10000,
     currently_in_area_count: int = 0,
@@ -58,6 +62,8 @@ def build_data(
             altitude_ft=overhead_altitude_ft,
         ),
         "military": query_military(conn, military_codes, tz),
+        "helicopters": query_helicopters(conn, helo_codes, tz),
+        "planes": query_planes(conn, helo_codes, tz),
         "top_routes": query_top_routes(conn),
         "hour_histogram": query_hour_histogram(conn, tz),
         "movements_today": query_movements_today(conn, tz),

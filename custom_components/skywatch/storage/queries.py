@@ -19,10 +19,12 @@ from datetime import UTC, datetime, timedelta
 from urllib.parse import quote_plus
 from zoneinfo import ZoneInfo
 
-DEFAULT_RECENT_PAGE_SIZE = 10
+DEFAULT_RECENT_PAGE_SIZE = 40
 DEFAULT_SEARCH_LIMIT = 25
 DEFAULT_OVERHEAD_LIMIT = 50
 DEFAULT_MILITARY_LIMIT = 50
+DEFAULT_HELICOPTER_LIMIT = 50
+DEFAULT_PLANE_LIMIT = 50
 DEFAULT_MOVEMENTS_LIMIT = 30
 DEFAULT_AIRCRAFT_RECENT_LIMIT = 10
 
@@ -270,6 +272,70 @@ def query_military(
             codes,
         ).fetchone()[0]
     )
+    return {"count": total, "sightings": rows}
+
+
+def query_helicopters(
+    conn: sqlite3.Connection,
+    codes: tuple[str, ...],
+    tz: ZoneInfo,
+    limit: int = DEFAULT_HELICOPTER_LIMIT,
+) -> dict:
+    """Sightings whose aircraft_code is in the configured helicopter list.
+
+    Mirrors query_military's shape so the two render identically on a
+    dashboard — only the code list and the resulting rows differ.
+    """
+    if not codes:
+        return {"count": 0, "sightings": []}
+    placeholders = ",".join(["?"] * len(codes))
+    rows = _decorate(
+        conn.execute(
+            f"""SELECT * FROM sightings
+                WHERE UPPER(IFNULL(aircraft_code,'')) IN ({placeholders})
+                ORDER BY exit_time DESC LIMIT ?""",
+            (*codes, limit),
+        ).fetchall(),
+        tz,
+    )
+    total = int(
+        conn.execute(
+            f"""SELECT COUNT(*) FROM sightings
+                WHERE UPPER(IFNULL(aircraft_code,'')) IN ({placeholders})""",
+            codes,
+        ).fetchone()[0]
+    )
+    return {"count": total, "sightings": rows}
+
+
+def query_planes(
+    conn: sqlite3.Connection,
+    helo_codes: tuple[str, ...],
+    tz: ZoneInfo,
+    limit: int = DEFAULT_PLANE_LIMIT,
+) -> dict:
+    """Sightings whose aircraft_code is NOT in the configured helicopter list.
+
+    'Planes' is everything that isn't a helicopter — fixed-wing military
+    types included, since query_military already surfaces those
+    separately as an overlapping, not mutually-exclusive, category.
+    An empty helo_codes list means every sighting qualifies.
+    """
+    if not helo_codes:
+        where = "1=1"
+        params: tuple = ()
+    else:
+        placeholders = ",".join(["?"] * len(helo_codes))
+        where = f"UPPER(IFNULL(aircraft_code,'')) NOT IN ({placeholders})"
+        params = tuple(helo_codes)
+    rows = _decorate(
+        conn.execute(
+            f"SELECT * FROM sightings WHERE {where} ORDER BY exit_time DESC LIMIT ?",
+            (*params, limit),
+        ).fetchall(),
+        tz,
+    )
+    total = int(conn.execute(f"SELECT COUNT(*) FROM sightings WHERE {where}", params).fetchone()[0])
     return {"count": total, "sightings": rows}
 
 

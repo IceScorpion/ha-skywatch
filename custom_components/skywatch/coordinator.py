@@ -215,6 +215,7 @@ class SkywatchCoordinator(DataUpdateCoordinator):
             current_page=self._current_page,
             current_search=self._current_search,
             military_codes=self._military_codes,
+            helo_codes=self._helo_codes,
             watch_list=self._watch_list,
             overhead_distance_km=self._overhead_distance_km,
             overhead_altitude_ft=self._overhead_altitude_ft,

@@ -12,7 +12,7 @@ Home Assistant integration that captures, persists, and surfaces aircraft sighti
 
 ## What you get
 
-- **13 entities** — sightings today / this week / all-time / overhead / military / movements / 1h / 24h activity / search results / hour-of-day histogram / top routes, plus `aircraft_present` and `helicopter_overhead` binary sensors
+- **15 entities** — sightings today / this week / all-time / overhead / military / helicopter / airplane / movements / 1h / 24h activity / search results / hour-of-day histogram / top routes, plus `aircraft_present` and `helicopter_overhead` binary sensors
 - **Per-watch sensors** — add a watch entry via the options flow (registration or "Blocked" fingerprint), get `sensor.skywatch_watch_<slug>` with lifetime count + last-seen details
 - **Native control entities** — `number.skywatch_sightings_page` (with +/- buttons), `text.skywatch_search_term`, `switch.skywatch_alerts_enabled`, `button.skywatch_clear_search`
 - **Live Leaflet map** at `/api/skywatch/map` — 5 aircraft silhouettes (jet / turboprop / light GA / military / helicopter), 5-tier altitude colour ramp, heading-based rotation, 30-min trail polylines, 50 km AOI + 8 km audible-range rings
@@ -91,6 +91,8 @@ recorder:
       - sensor.skywatch_search_results
       - sensor.skywatch_overhead_sightings
       - sensor.skywatch_military_sightings
+      - sensor.skywatch_helicopter_sightings
+      - sensor.skywatch_airplane_sightings
       - sensor.skywatch_airport_movements_today
       - sensor.skywatch_sightings_hour_of_day
 ```

@@ -16,6 +16,8 @@ recorder:
       - sensor.skywatch_log_search
       - sensor.skywatch_log_overhead
       - sensor.skywatch_military_sightings
+      - sensor.skywatch_helicopter_sightings
+      - sensor.skywatch_airplane_sightings
       - sensor.skywatch_movements_today
       - sensor.skywatch_log_hour_histogram
 ```
