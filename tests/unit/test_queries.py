@@ -17,10 +17,12 @@ from custom_components.skywatch.models import Movement, Sighting
 from custom_components.skywatch.storage import (
     insert_movement,
     insert_sighting,
+    query_helicopters,
     query_hour_histogram,
     query_military,
     query_movements_today,
     query_overhead,
+    query_planes,
     query_recent,
     query_search,
     query_stats,
@@ -145,7 +147,7 @@ class TestRecent:
             "total_count",
         }
         assert result["total_count"] == 7
-        assert result["page_size"] == 10
+        assert result["page_size"] == 40
         assert len(result["sightings"]) == 7
 
     def test_sighting_rows_are_decorated(self, seeded: sqlite3.Connection) -> None:
@@ -262,6 +264,69 @@ class TestMilitary:
     def test_multiple_codes(self, seeded: sqlite3.Connection) -> None:
         result = query_military(seeded, codes=("C17", "C130", "P8"), tz=REGINA)
         assert result["count"] == 1  # only C17 in seed
+
+
+class TestHelicoptersAndPlanes:
+    def test_no_helicopters_in_seed(self, seeded: sqlite3.Connection) -> None:
+        result = query_helicopters(seeded, codes=("B06",), tz=REGINA)
+        assert result == {"count": 0, "sightings": []}
+
+    def test_empty_codes_returns_zero_helicopters(self, seeded: sqlite3.Connection) -> None:
+        result = query_helicopters(seeded, codes=(), tz=REGINA)
+        assert result == {"count": 0, "sightings": []}
+
+    def test_planes_include_everything_when_no_helicopters_seeded(
+        self, seeded: sqlite3.Connection
+    ) -> None:
+        result = query_planes(seeded, helo_codes=("B06",), tz=REGINA)
+        assert result["count"] == 7
+
+    def test_planes_include_all_when_helo_codes_empty(self, seeded: sqlite3.Connection) -> None:
+        result = query_planes(seeded, helo_codes=(), tz=REGINA)
+        assert result["count"] == 7
+
+    def test_helicopter_excluded_from_planes_and_included_in_helicopters(
+        self, db_conn: sqlite3.Connection
+    ) -> None:
+        base = datetime(2026, 6, 13, 12, 0, 0, tzinfo=UTC)
+        insert_sighting(
+            db_conn,
+            Sighting(
+                exit_time=base,
+                callsign="HELI1",
+                aircraft_code="B06",
+                aircraft_model="Bell 206",
+            ),
+        )
+        insert_sighting(
+            db_conn,
+            Sighting(
+                exit_time=base,
+                callsign="JET1",
+                aircraft_code="B738",
+                aircraft_model="Boeing 737-800",
+            ),
+        )
+        db_conn.commit()
+
+        helis = query_helicopters(db_conn, codes=("B06",), tz=REGINA)
+        planes = query_planes(db_conn, helo_codes=("B06",), tz=REGINA)
+
+        assert helis["count"] == 1
+        assert helis["sightings"][0]["aircraft_code"] == "B06"
+        assert planes["count"] == 1
+        assert planes["sightings"][0]["aircraft_code"] == "B738"
+
+    def test_helicopter_code_match_is_case_insensitive(self, db_conn: sqlite3.Connection) -> None:
+        base = datetime(2026, 6, 13, 12, 0, 0, tzinfo=UTC)
+        insert_sighting(
+            db_conn,
+            Sighting(exit_time=base, callsign="HELI1", aircraft_code="b06"),
+        )
+        db_conn.commit()
+
+        result = query_helicopters(db_conn, codes=("B06",), tz=REGINA)
+        assert result["count"] == 1
 
 
 class TestWatchAircraft:

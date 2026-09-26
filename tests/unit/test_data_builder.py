@@ -88,6 +88,8 @@ def test_data_dict_has_all_top_level_keys(seeded: sqlite3.Connection) -> None:
         "recent",
         "overhead",
         "military",
+        "helicopters",
+        "planes",
         "top_routes",
         "hour_histogram",
         "movements_today",
@@ -186,6 +188,47 @@ def test_active_counts_include_currently_in_area(seeded: sqlite3.Connection) -> 
     # The three in-area aircraft add to both rolling-window counts.
     assert data_three["active_1h"]["count"] == data_zero["active_1h"]["count"] + 3
     assert data_three["active_24h"]["count"] == data_zero["active_24h"]["count"] + 3
+
+
+def test_helicopters_and_planes_are_split_by_helo_codes(seeded: sqlite3.Connection) -> None:
+    insert_sighting(
+        seeded,
+        Sighting(
+            exit_time=datetime(2026, 6, 13, 12, 0, 0, tzinfo=UTC),
+            callsign="HELI1",
+            aircraft_code="B06",
+            aircraft_model="Bell 206",
+        ),
+    )
+    seeded.commit()
+
+    data = build_data(
+        seeded,
+        tz=REGINA,
+        current_page=1,
+        current_search="",
+        military_codes=DEFAULT_MILITARY_CODES,
+        watch_list=(),
+        helo_codes=("B06",),
+    )
+    # 3 seeded fixed-wing sightings + the new B06 helicopter = 4 total.
+    assert data["helicopters"]["count"] == 1
+    assert data["planes"]["count"] == 3
+
+
+def test_helicopters_default_to_the_builtin_code_list(seeded: sqlite3.Connection) -> None:
+    # No helo_codes passed — falls back to DEFAULT_HELO_CODES, none of
+    # which appear in the seeded fixed-wing/military rows.
+    data = build_data(
+        seeded,
+        tz=REGINA,
+        current_page=1,
+        current_search="",
+        military_codes=DEFAULT_MILITARY_CODES,
+        watch_list=(),
+    )
+    assert data["helicopters"]["count"] == 0
+    assert data["planes"]["count"] == 3
 
 
 def test_overhead_thresholds_configurable(seeded: sqlite3.Connection) -> None:

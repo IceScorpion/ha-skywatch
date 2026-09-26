@@ -8,8 +8,12 @@ assemble the platform-facing data dict.
 Sync vs async boundary: storage and data_builder are pure-sync; this
 coordinator wraps each sqlite call in `hass.async_add_executor_job` so
 the I/O never blocks the event loop. Source event handlers are sync
-(see backends/base.py) and schedule async persistence via
-`hass.async_create_task`.
+and may be invoked from a worker thread (backend polling/executor),
+NOT necessarily the event loop — so they immediately hop back onto
+the loop via `hass.loop.call_soon_threadsafe` before touching
+`hass.bus.async_fire` or `hass.async_create_task`, both of which are
+event-loop-only APIs. See
+https://developers.home-assistant.io/docs/asyncio_thread_safety/
 """
 
 from __future__ import annotations
@@ -21,10 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 from zoneinfo import ZoneInfo
 
-from homeassistant.helpers.event import (
-    async_track_state_change_event,
-    async_track_time_interval,
-)
+from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 
 from .classify import is_helicopter, is_military, match_watch
@@ -123,24 +124,13 @@ class SkywatchCoordinator(DataUpdateCoordinator):
             self._source.on_landing(self._on_landing),
             self._source.on_takeoff(self._on_takeoff),
         ]
-        # Trail capture: prefer event-driven (subscribe to the source's
-        # state-bearing sensors) so we capture exactly once per FR24
-        # poll instead of running 3 redundant 5-second ticks per 15s
-        # FR24 cycle. Falls back to time-interval ticks if the source
-        # has no watched_entities (e.g. event-only backends like a
-        # future dump1090 adapter).
-        watched = self._source.watched_entities()
-        if watched:
-            self._unsub_trail_capture = async_track_state_change_event(
-                self.hass, watched, self._capture_positions
-            )
-            # Capture once at startup — won't have a state-change event
-            # for FR24's existing state until it next polls.
-            self.hass.async_create_task(self._capture_positions())
-        else:
-            self._unsub_trail_capture = async_track_time_interval(
-                self.hass, self._capture_positions, TRAIL_CAPTURE_INTERVAL
-            )
+        # Fast trail-capture loop: every 5 s sample every in-area flight's
+        # lat/lon into flight_positions, then prune anything > 30 min old.
+        # Independent of the 30 s data refresh — trails need finer
+        # resolution.
+        self._unsub_trail_capture = async_track_time_interval(
+            self.hass, self._capture_positions, TRAIL_CAPTURE_INTERVAL
+        )
         await self.async_config_entry_first_refresh()
 
     async def async_unload(self) -> None:
@@ -161,17 +151,12 @@ class SkywatchCoordinator(DataUpdateCoordinator):
             return {}
         return await self.hass.async_add_executor_job(fetch_trails, self._conn, flight_ids)
 
-    async def _capture_positions(self, *_args) -> None:
-        """Trail capture — sample positions, persist, prune.
+    async def _capture_positions(self, _now=None) -> None:
+        """Trail capture tick — sample positions + persist + prune.
 
-        Signature accepts either a fire-at-time arg (from
-        async_track_time_interval) or a state-changed event (from
-        async_track_state_change_event); both are ignored, the function
-        always reads source.current_flights() fresh.
-
-        Async so the scheduling layer awaits the persistence directly.
-        Earlier sync + async_create_task pattern dropped the coroutine
-        on the floor in HA 2026 (RuntimeWarning: never awaited).
+        Async so async_track_time_interval awaits the persistence
+        directly. Earlier sync + async_create_task pattern dropped the
+        coroutine on the floor in HA 2026 (RuntimeWarning: never awaited).
         """
         if self._conn is None:
             return
@@ -230,13 +215,31 @@ class SkywatchCoordinator(DataUpdateCoordinator):
             current_page=self._current_page,
             current_search=self._current_search,
             military_codes=self._military_codes,
+            helo_codes=self._helo_codes,
             watch_list=self._watch_list,
             overhead_distance_km=self._overhead_distance_km,
             overhead_altitude_ft=self._overhead_altitude_ft,
             currently_in_area_count=len(self._source.current_flights()),
         )
 
+    # ------------------------------------------------------------------
+    # Source event handlers.
+    #
+    # These are registered as callbacks on the backend adapter (see
+    # backends/base.py) and may be invoked from a worker thread rather
+    # than the event loop — the backend's polling/websocket handling is
+    # free to run wherever it wants. `hass.bus.async_fire` and
+    # `hass.async_create_task` both require the event loop, so every
+    # handler below does nothing itself except hop onto the loop via
+    # `call_soon_threadsafe`; the actual work happens in the paired
+    # `_*_on_loop` method, which is guaranteed to run on the loop
+    # regardless of which thread called the public handler.
+    # ------------------------------------------------------------------
+
     def _on_entry(self, entry: Entry) -> None:
+        self.hass.loop.call_soon_threadsafe(self._on_entry_on_loop, entry)
+
+    def _on_entry_on_loop(self, entry: Entry) -> None:
         self._fire_skywatch_event(
             kind="entry",
             flight_id=entry.flight_id,
@@ -248,6 +251,9 @@ class SkywatchCoordinator(DataUpdateCoordinator):
         self.hass.async_create_task(self._async_persist_entry(entry))
 
     def _on_exit(self, flight_id: str | None, sighting: Sighting) -> None:
+        self.hass.loop.call_soon_threadsafe(self._on_exit_on_loop, flight_id, sighting)
+
+    def _on_exit_on_loop(self, flight_id: str | None, sighting: Sighting) -> None:
         self._fire_skywatch_event(
             kind="exit",
             flight_id=flight_id,
@@ -259,6 +265,9 @@ class SkywatchCoordinator(DataUpdateCoordinator):
         self.hass.async_create_task(self._async_persist_exit(flight_id, sighting))
 
     def _on_landing(self, movement: Movement) -> None:
+        self.hass.loop.call_soon_threadsafe(self._on_landing_on_loop, movement)
+
+    def _on_landing_on_loop(self, movement: Movement) -> None:
         self._fire_skywatch_event(
             kind="landed",
             flight_id=None,
@@ -270,6 +279,9 @@ class SkywatchCoordinator(DataUpdateCoordinator):
         self.hass.async_create_task(self._async_persist_movement(movement))
 
     def _on_takeoff(self, movement: Movement) -> None:
+        self.hass.loop.call_soon_threadsafe(self._on_takeoff_on_loop, movement)
+
+    def _on_takeoff_on_loop(self, movement: Movement) -> None:
         self._fire_skywatch_event(
             kind="took_off",
             flight_id=None,
@@ -295,6 +307,9 @@ class SkywatchCoordinator(DataUpdateCoordinator):
         Blueprints listen to this single event instead of FR24-specific
         events so that swapping the source backend doesn't break the
         user's automations.
+
+        MUST be called from the event loop — see the `_on_*_on_loop`
+        wrappers above, which are the only callers.
         """
         watch = match_watch(
             {

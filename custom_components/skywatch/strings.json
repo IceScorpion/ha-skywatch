@@ -1,0 +1,85 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Skywatch",
+        "description": "Set up Skywatch to record and surface aircraft sightings around your home.",
+        "data": {
+          "home_latitude": "Home latitude",
+          "home_longitude": "Home longitude",
+          "airport_iata": "Nearby airport IATA code (optional)",
+          "radius_km": "Watch radius (km)"
+        }
+      }
+    },
+    "error": {
+      "invalid_latitude": "Latitude must be between -90 and 90.",
+      "invalid_longitude": "Longitude must be between -180 and 180.",
+      "invalid_iata": "Airport code must be exactly 3 letters (e.g. JFK).",
+      "fr24_not_loaded": "The Flightradar24 integration must be installed and configured before Skywatch."
+    },
+    "abort": {
+      "already_configured": "Skywatch is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "menu_options": {
+          "watch_list": "Watch list",
+          "codes": "Helicopter / military ICAO codes",
+          "thresholds": "Overhead thresholds & alerts"
+        }
+      },
+      "watch_list": {
+        "title": "Watch list",
+        "description": "Current entries: {current}",
+        "menu_options": {
+          "add_watch": "Add entry",
+          "remove_watch": "Remove entry",
+          "init": "Back to main menu"
+        }
+      },
+      "add_watch": {
+        "title": "Add watch entry",
+        "description": "Provide at least a registration, an aircraft type code, or enable \"match blocked\".",
+        "data": {
+          "slug": "Slug (lowercase, letters/numbers/underscore only)",
+          "label": "Label",
+          "registration": "Registration (e.g. D-ABCD)",
+          "aircraft_code": "Aircraft type ICAO code (e.g. A320)",
+          "match_blocked": "Also match sightings with no data (\"Blocked\")"
+        }
+      },
+      "remove_watch": {
+        "title": "Remove watch entry",
+        "data": {
+          "slug": "Entry to remove"
+        }
+      },
+      "codes": {
+        "title": "Helicopter / military ICAO codes",
+        "description": "Comma-separated lists of ICAO aircraft type codes. Leave a field as-is to keep the current list.",
+        "data": {
+          "helo_codes": "Helicopter ICAO codes",
+          "military_codes": "Military ICAO codes"
+        }
+      },
+      "thresholds": {
+        "title": "Overhead thresholds & alerts",
+        "data": {
+          "overhead_distance_km": "Overhead distance (km)",
+          "overhead_altitude_ft": "Overhead altitude (ft)",
+          "alerts_enabled": "Alerts enabled",
+          "quiet_hours_start": "Quiet hours start (HH:MM, optional)",
+          "quiet_hours_end": "Quiet hours end (HH:MM, optional)"
+        }
+      }
+    },
+    "error": {
+      "invalid_slug": "Slug may only contain lowercase letters, numbers and underscores.",
+      "slug_exists": "A watch entry with this slug already exists.",
+      "watch_entry_needs_criteria": "Provide at least a registration, an aircraft code, or enable \"match blocked\"."
+    }
+  }
+}
